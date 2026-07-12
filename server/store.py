@@ -7,7 +7,7 @@ from typing import Dict, List, Set
 
 from fastapi import WebSocket
 
-from models import GPSData
+from models import GPSData, DeviceEvent
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,21 @@ class GPSStore:
             )
         return devices
 
+    async def broadcast_event(self, event: DeviceEvent) -> int:
+        """Broadcast a device event to all subscribers.
+
+        Events are wrapped with a "type": "event" field so clients can
+        distinguish them from GPS updates.
+        """
+        payload = {
+            "type": "event",
+            **event.model_dump(mode="json"),
+        }
+        await self._manager.broadcast(event.device_id, payload)
+        return self._manager.subscriber_count(event.device_id)
+
 
 # --- Singletons ---
 manager = ConnectionManager()
 gps_store = GPSStore(manager)
+
