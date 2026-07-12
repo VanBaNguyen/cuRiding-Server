@@ -62,20 +62,26 @@ class TelemetryStore:
                 crash_suspected=False,
             )
 
-        # relay the heartbeat itself on the device's WebSocket channel
+        # everything the app consumes is published under the single
+        # app-facing device id, in the legacy GPS/event message shapes
+        app_id = settings.app_device_id
+
+        # relay the full heartbeat on a SEPARATE "-telemetry" channel so a
+        # richer client can opt in; the legacy app's channel never sees this
+        # unfamiliar message shape
         payload = {
             "type": "telemetry",
             "received_at": now.isoformat(),
             **heartbeat.model_dump(mode="json"),
         }
-        await manager.broadcast(heartbeat.device, payload)
+        await manager.broadcast(f"{app_id}-telemetry", payload)
 
         # mirror a valid GPS fix into the GPS store so the existing map
         # endpoints and WebSocket messages keep working unchanged
         if heartbeat.gps.valid and heartbeat.gps.lat is not None:
             await gps_store.update(
                 GPSData(
-                    device_id=heartbeat.device,
+                    device_id=app_id,
                     latitude=heartbeat.gps.lat,
                     longitude=heartbeat.gps.lon,
                     speed=max(heartbeat.speedKmh, 0.0) / 3.6,
@@ -84,11 +90,11 @@ class TelemetryStore:
                 )
             )
 
-        # surface rider alerts (danger warnings, red light) as events
+        # surface rider alerts (danger warnings, red light) as legacy events
         if new_alert:
             await gps_store.broadcast_event(
                 DeviceEvent(
-                    device_id=heartbeat.device,
+                    device_id=app_id,
                     event_type=EventType.CUSTOM,
                     message=heartbeat.alert,
                     speed=max(heartbeat.speedKmh, 0.0) / 3.6,
@@ -99,13 +105,13 @@ class TelemetryStore:
             logger.warning("Device %s heartbeats resumed", heartbeat.device)
             await gps_store.broadcast_event(
                 DeviceEvent(
-                    device_id=heartbeat.device,
+                    device_id=app_id,
                     event_type=EventType.CUSTOM,
                     message="heartbeats resumed",
                 )
             )
 
-        return manager.subscriber_count(heartbeat.device)
+        return manager.subscriber_count(app_id)
 
     def get_latest(self, device: str) -> Optional[TelemetryStatus]:
         return self._status.get(device)
@@ -153,7 +159,7 @@ class TelemetryStore:
             )
             await gps_store.broadcast_event(
                 DeviceEvent(
-                    device_id=device,
+                    device_id=settings.app_device_id,
                     event_type=EventType.CRASH,
                     message=(
                         "heartbeats stopped while moving at "

@@ -139,7 +139,7 @@ class HaystackPoller:
         self._last_timestamp = timestamp
 
         return GPSData(
-            device_id=settings.haystack_device_id,
+            device_id=settings.app_device_id,
             latitude=latitude,
             longitude=longitude,
             accuracy=float(confidence),
@@ -152,7 +152,7 @@ class HaystackPoller:
             "Haystack poller running: %s every %ds (device '%s')",
             settings.haystack_url,
             settings.haystack_poll_s,
-            settings.haystack_device_id,
+            settings.app_device_id,
         )
 
         async with httpx.AsyncClient() as client:

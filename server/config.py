@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
+    # The single device_id the mobile app subscribes to. Tag location and all
+    # Pi events (alerts, crash) are published under this id so the app sees one
+    # unified scooter on /api/v1/ws/gps/{device_id} and /api/v1/gps/{id}/latest.
+    # Set this to whatever id your existing app already uses.
+    app_device_id: str = "scooter"
+
     # Crash detection: a device that stops heartbeating for crash_gap_s
     # seconds while last seen at >= crash_min_speed_kmh raises a crash event.
     crash_gap_s: float = 30.0
@@ -25,7 +31,6 @@ class Settings(BaseSettings):
     haystack_user: str = ""
     haystack_pass: str = ""
     haystack_keyfile: str = ""
-    haystack_device_id: str = "scooter-tag"
     haystack_poll_s: int = 60
     haystack_days: int = 1
 
