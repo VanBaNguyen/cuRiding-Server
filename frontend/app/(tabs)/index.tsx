@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useRef } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CrashCountdown } from '@/src/components/CrashCountdown';
 import DeviceMap from '@/src/components/DeviceMap';
@@ -8,8 +9,24 @@ import { useTelemetry } from '@/src/context/TelemetryContext';
 import { theme } from '@/src/theme';
 
 export default function LiveMapScreen() {
-  const { live, trail, focusEvent, setFocusEvent, crashCountdown } = useTelemetry();
+  const { live, trail, focusEvent, setFocusEvent, crashCountdown, simulateCrash } = useTelemetry();
   const showEmergencyBanner = live.status === 'emergency' && !crashCountdown.active;
+
+  const tapCount = useRef(0);
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSecretTap = () => {
+    tapCount.current += 1;
+    if (tapTimer.current) clearTimeout(tapTimer.current);
+    if (tapCount.current >= 3) {
+      tapCount.current = 0;
+      simulateCrash();
+      return;
+    }
+    tapTimer.current = setTimeout(() => {
+      tapCount.current = 0;
+    }, 600);
+  };
 
   return (
     <View style={styles.container}>
@@ -23,10 +40,10 @@ export default function LiveMapScreen() {
 
       <View style={styles.overlay}>
         <View style={styles.topRow}>
-          <View>
+          <Pressable onPress={handleSecretTap}>
             <Text style={styles.brand}>CuRiding</Text>
             <Text style={styles.sub}>Ottawa · live device</Text>
-          </View>
+          </Pressable>
           <StatusChip status={live.status} />
         </View>
 

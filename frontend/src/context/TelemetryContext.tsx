@@ -30,6 +30,7 @@ interface TelemetryContextValue {
   crashCountdown: CrashCountdownState;
   dismissCrashCountdown: () => void;
   triggerEmergencyCall: () => void;
+  simulateCrash: () => void;
 }
 
 const TelemetryContext = createContext<TelemetryContextValue | null>(null);
@@ -115,6 +116,24 @@ export function TelemetryProvider({ children }: { children: React.ReactNode }) {
   const clearEvents = useCallback(() => {
     setEvents([]);
   }, []);
+
+  const simulateCrash = useCallback(() => {
+    const now = new Date().toISOString();
+    const crashEvent: SafetyEvent = {
+      id: `evt-${Date.now()}`,
+      type: 'crash',
+      title: 'CRASH DETECTED',
+      message: 'Crash detected — emergency protocol initiated.',
+      timestamp: now,
+      lat: live.position.lat,
+      lng: live.position.lng,
+      emergencyCalled: false,
+    };
+    setEvents((prev) => [crashEvent, ...prev]);
+    setFocusEvent(crashEvent);
+    startCrashCountdown(crashEvent);
+    setLive((prev) => ({ ...prev, status: 'emergency' as DeviceStatus }));
+  }, [live.position.lat, live.position.lng, startCrashCountdown]);
 
   useEffect(() => {
     let ws: WebSocket;
@@ -226,8 +245,9 @@ export function TelemetryProvider({ children }: { children: React.ReactNode }) {
       crashCountdown,
       dismissCrashCountdown,
       triggerEmergencyCall,
+      simulateCrash,
     }),
-    [live, trail, events, focusEvent, emergencyNumber, crashCountdown, clearEvents, dismissCrashCountdown, triggerEmergencyCall],
+    [live, trail, events, focusEvent, emergencyNumber, crashCountdown, clearEvents, dismissCrashCountdown, triggerEmergencyCall, simulateCrash],
   );
 
   return <TelemetryContext.Provider value={value}>{children}</TelemetryContext.Provider>;
