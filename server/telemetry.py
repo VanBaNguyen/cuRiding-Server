@@ -151,28 +151,38 @@ class TelemetryStore:
                 if status.crash_suspected:
                     continue
                 gap = (now - status.received_at).total_seconds()
-                was_moving = status.heartbeat.speedKmh >= settings.crash_min_speed_kmh
+                # speed < 0 means "unknown" (no GPS module). With no speed we
+                # cannot rule out that the scooter was moving, so a heartbeat
+                # gap is treated as a crash/loss regardless — this is the
+                # original "stops pinging => crash" intent. When speed IS
+                # known, require it to have been moving to avoid flagging a
+                # scooter that was simply parked and switched off.
+                speed = status.heartbeat.speedKmh
+                was_moving = speed < 0 or speed >= settings.crash_min_speed_kmh
                 if gap >= settings.crash_gap_s and was_moving:
                     status.crash_suspected = True
                     suspects.append(device)
 
         for device in suspects:
             status = self._status[device]
+            speed = status.heartbeat.speedKmh
+            silent_s = (now - status.received_at).total_seconds()
             logger.error(
-                "CRASH SUSPECTED: %s silent for %.0fs, last speed %.1f km/h",
+                "CRASH SUSPECTED: %s silent for %.0fs, last speed %s",
                 device,
-                (now - status.received_at).total_seconds(),
-                status.heartbeat.speedKmh,
+                silent_s,
+                "unknown (no GPS)" if speed < 0 else f"{speed:.1f} km/h",
             )
+            if speed < 0:
+                message = f"heartbeats stopped for {silent_s:.0f}s (no speed data)"
+            else:
+                message = f"heartbeats stopped while moving at {speed:.1f} km/h"
             await gps_store.broadcast_event(
                 DeviceEvent(
                     device_id=settings.app_device_id,
                     event_type=EventType.CRASH,
-                    message=(
-                        "heartbeats stopped while moving at "
-                        f"{status.heartbeat.speedKmh:.1f} km/h"
-                    ),
-                    speed=max(status.heartbeat.speedKmh, 0.0) / 3.6,
+                    message=message,
+                    speed=max(speed, 0.0) / 3.6,
                 )
             )
             # save the pre-crash camera footage as a clip
