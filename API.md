@@ -60,6 +60,29 @@ REST fallback: `GET /api/v1/gps/scooter/latest`, `GET /api/v1/gps/devices`.
 `online` is true when a heartbeat arrived within `HEARTBEAT_ONLINE_S` (10s).
 `age_seconds` on each block lets you show "updated Ns ago".
 
+### ⚠️ Treat missing heartbeats as a problem, not just "no data"
+
+The scooter sends a heartbeat about **once per second** while it's alive.
+So heartbeats are the liveness signal — their *absence* is meaningful:
+
+- **`online: false`** (or `heartbeat.age_seconds` climbing past ~10s) means the
+  scooter has **stopped reporting**: it lost power, the network dropped, the
+  app died, or the rider crashed. The app should surface this as a visible
+  **warning state** ("Scooter offline / not reporting"), not silently show
+  stale data.
+- If the scooter was **moving** when heartbeats stopped, that's the crash /
+  theft signal. The server raises a `crash` event automatically (see the
+  events on `/ws/gps/scooter`) and saves a pre-crash clip — but the app
+  should *also* independently flag a prolonged offline even if no crash event
+  arrived (e.g. a total power loss can cut the connection before the watchdog
+  fires).
+- **`heartbeat: null`** means the scooter has never reported since the server
+  started — show "no device" / "waiting for scooter".
+
+Practical rule for the app: **green when `online` is true and the age is
+small; amber/red when it goes false or the age keeps growing.** A live map dot
+with silently frozen telemetry is worse than an explicit "offline" badge.
+
 REST: `GET /api/v1/status`.
 
 ---
