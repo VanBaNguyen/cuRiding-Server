@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # Set this to whatever id your existing app already uses.
     app_device_id: str = "scooter"
 
+    # Human-readable device metadata the app displays (name + hardware).
+    app_device_name: str = "cuRiding Scooter"
+    app_device_hardware: str = "Raspberry Pi 5 (QNX 8) + ESP32-C3 Find My tag"
+
     # Crash detection: a device that stops heartbeating for crash_gap_s
     # seconds while last seen at >= crash_min_speed_kmh raises a crash event.
     crash_gap_s: float = 30.0

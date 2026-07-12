@@ -139,6 +139,8 @@ def build_status() -> dict:
     return {
         "type": "status",
         "app_device_id": app_id,
+        "name": settings.app_device_name,
+        "hardware": settings.app_device_hardware,
         "server_time": now.isoformat(),
         "online": online,
         "heartbeat": heartbeat,
