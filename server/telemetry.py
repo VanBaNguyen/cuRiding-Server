@@ -116,6 +116,12 @@ class TelemetryStore:
     def get_latest(self, device: str) -> Optional[TelemetryStatus]:
         return self._status.get(device)
 
+    def most_recent(self) -> Optional[TelemetryStatus]:
+        """The newest heartbeat across all devices (aliveness at a glance)."""
+        if not self._status:
+            return None
+        return max(self._status.values(), key=lambda s: s.received_at)
+
     def list_devices(self) -> List[dict]:
         return [
             {

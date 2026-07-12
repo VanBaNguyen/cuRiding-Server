@@ -1,9 +1,12 @@
 """API routes for GPS ingest and relay."""
 
+import asyncio
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 
+from config import settings
 from models import (
     GPSData,
     GPSResponse,
@@ -83,6 +86,87 @@ async def ingest_nmea(
         device_id=data.device_id,
         subscribers=subscribers,
     )
+
+
+# ---------------------------------------------------------------------------
+# Status — freshness of the live data (for a dashboard / connectivity check)
+# ---------------------------------------------------------------------------
+
+
+def _age_seconds(when: datetime, now: datetime) -> float:
+    """Seconds between a stored timestamp and now, tolerant of naive UTC."""
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return round((now - when).total_seconds(), 1)
+
+
+def build_status() -> dict:
+    """Snapshot of how fresh the live data is: last heartbeat and last position.
+
+    - `heartbeat` is the most recent Pi heartbeat (aliveness / crash source).
+    - `position` is the last known location of the app device (Find My tag
+      or a GPS module).
+    - `online` is true when a heartbeat arrived within heartbeat_online_s.
+    Each carries an `age_seconds` so a client can show "updated Ns ago".
+    """
+    now = datetime.now(timezone.utc)
+    app_id = settings.app_device_id
+
+    position = None
+    pos = gps_store.get_latest(app_id)
+    if pos is not None:
+        position = {
+            "last_update": pos.timestamp.isoformat(),
+            "age_seconds": _age_seconds(pos.timestamp, now),
+            "latitude": pos.latitude,
+            "longitude": pos.longitude,
+        }
+
+    heartbeat = None
+    hb = telemetry_store.most_recent()
+    if hb is not None:
+        heartbeat = {
+            "device": hb.heartbeat.device,
+            "last_heartbeat": hb.received_at.isoformat(),
+            "age_seconds": _age_seconds(hb.received_at, now),
+            "seq": hb.heartbeat.seq,
+            "speedKmh": hb.heartbeat.speedKmh,
+            "alert": hb.heartbeat.alert,
+            "crash_suspected": hb.crash_suspected,
+        }
+
+    online = heartbeat is not None and heartbeat["age_seconds"] <= settings.heartbeat_online_s
+    return {
+        "type": "status",
+        "app_device_id": app_id,
+        "server_time": now.isoformat(),
+        "online": online,
+        "heartbeat": heartbeat,
+        "position": position,
+    }
+
+
+@router.get("/status")
+async def status_summary() -> dict:
+    """Convenience HTTP snapshot of build_status() (same data as the WS)."""
+    return build_status()
+
+
+@router.websocket("/ws/status")
+async def status_websocket(websocket: WebSocket) -> None:
+    """Stream the freshness summary over WebSocket (WSS through the tunnel).
+
+    Sends a status frame on connect and then every status_push_s seconds, so a
+    dashboard can show live "last heartbeat / last position" ages without any
+    HTTP polling. Each frame carries "type": "status".
+    """
+    await websocket.accept()
+    try:
+        while True:
+            await websocket.send_json(build_status())
+            await asyncio.sleep(settings.status_push_s)
+    except (WebSocketDisconnect, RuntimeError):
+        logger.info("Status WebSocket client disconnected")
 
 
 # ---------------------------------------------------------------------------

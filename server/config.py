@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     crash_gap_s: float = 30.0
     crash_min_speed_kmh: float = 5.0
 
+    # a device counts as "online" if its last heartbeat is newer than this
+    heartbeat_online_s: float = 10.0
+    # how often the status WebSocket pushes a fresh summary
+    status_push_s: float = 2.0
+
     # Find My integration via macless-haystack. Leave haystack_url empty to
     # disable. haystack_keyfile is the generate_keys.py PREFIX.keys output
     # (contains the tag's private key — mount it, never commit it).
