@@ -4,9 +4,17 @@ import logging
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 
-from models import GPSData, GPSResponse, NMEARequest, DeviceEvent
+from models import (
+    GPSData,
+    GPSResponse,
+    NMEARequest,
+    DeviceEvent,
+    TelemetryHeartbeat,
+    TelemetryStatus,
+)
 from nmea import parse_nmea
 from store import gps_store, manager
+from telemetry import telemetry_store
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +83,48 @@ async def ingest_nmea(
         device_id=data.device_id,
         subscribers=subscribers,
     )
+
+
+# ---------------------------------------------------------------------------
+# Telemetry — heartbeats from the QNX traffic-AI app
+# ---------------------------------------------------------------------------
+
+
+@router.post("/telemetry", status_code=status.HTTP_201_CREATED)
+async def ingest_telemetry(heartbeat: TelemetryHeartbeat) -> dict:
+    """Receive a telemetry heartbeat from the Pi.
+
+    The heartbeat is stored, relayed to WebSocket subscribers (as
+    "type": "telemetry"), any embedded GPS fix is mirrored into the GPS
+    store, and a newly raised rider alert is broadcast as an event. The
+    crash watchdog uses the heartbeat cadence: a stream that stops while
+    the rider was moving raises a crash event.
+    """
+    subscribers = await telemetry_store.update(heartbeat)
+    return {
+        "status": "ok",
+        "device": heartbeat.device,
+        "seq": heartbeat.seq,
+        "subscribers": subscribers,
+    }
+
+
+@router.get("/telemetry/{device_id}/latest", response_model=TelemetryStatus)
+async def get_latest_telemetry(device_id: str) -> TelemetryStatus:
+    """Return the most recent heartbeat (and crash state) for a device."""
+    latest = telemetry_store.get_latest(device_id)
+    if latest is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No telemetry for device '{device_id}'",
+        )
+    return latest
+
+
+@router.get("/telemetry/devices")
+async def list_telemetry_devices() -> list[dict]:
+    """Return heartbeat status for all devices that have reported."""
+    return telemetry_store.list_devices()
 
 
 # ---------------------------------------------------------------------------

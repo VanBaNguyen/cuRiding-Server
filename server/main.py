@@ -4,18 +4,38 @@ Receives GPS coordinates from Raspberry Pi 5 devices running QNX and relays
 them in real-time to React Native mobile clients over WebSocket.
 """
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
+from haystack import haystack_poller
 from routes import router
+from telemetry import crash_watchdog, telemetry_store
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
 )
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run the crash watchdog and the Find My poller alongside the API."""
+    tasks = [asyncio.create_task(crash_watchdog(telemetry_store))]
+    if haystack_poller.configured():
+        tasks.append(asyncio.create_task(haystack_poller.run()))
+    else:
+        logger.info("HAYSTACK_URL/HAYSTACK_KEYFILE not set; Find My polling disabled")
+    yield
+    for task in tasks:
+        task.cancel()
+
 
 app = FastAPI(
     title="cuRiding GPS Relay",
@@ -23,7 +43,8 @@ app = FastAPI(
         "Receives GPS data from Raspberry Pi 5 devices on QNX and relays "
         "updates to React Native mobile clients in real-time."
     ),
-    version="0.1.0",
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
 # Allow the React Native app (and dev tools) to connect from any origin.

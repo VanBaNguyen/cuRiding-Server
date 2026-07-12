@@ -10,4 +10,36 @@ services:
       - "8000:8000"
     env_file:
       - ./server/.env
+    volumes:
+      # generate_keys.py output containing the tag's private key; see README
+      - ./secrets:/secrets:ro
     restart: unless-stopped
+    depends_on:
+      - macless-haystack
+
+  # --- Find My (macless-haystack) -----------------------------------------
+  # anisette provides Apple auth headers; macless-haystack logs into Apple
+  # with a (burner) Apple ID and serves encrypted location reports on 6176.
+  # First run is interactive (Apple ID + 2FA): docker attach curiding-haystack
+
+  anisette:
+    image: dadoum/anisette-v3-server
+    container_name: curiding-anisette
+    volumes:
+      - anisette-v3_data:/home/Alcoholic/.config/anisette-v3
+    restart: always
+
+  macless-haystack:
+    image: christld/macless-haystack
+    container_name: curiding-haystack
+    volumes:
+      - mh_data:/app/endpoint/data
+    restart: unless-stopped
+    stdin_open: true   # first-run Apple ID login happens on this container's
+    tty: true          # stdin: docker attach curiding-haystack
+    depends_on:
+      - anisette
+
+volumes:
+  anisette-v3_data:
+  mh_data:

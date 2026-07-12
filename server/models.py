@@ -73,3 +73,43 @@ class DeviceInfo(BaseModel):
     last_seen: datetime
     latitude: float
     longitude: float
+
+
+class TelemetryGps(BaseModel):
+    """GPS block inside a telemetry heartbeat (field names match the Pi)."""
+
+    valid: bool = False
+    lat: Optional[float] = Field(None, ge=-90, le=90)
+    lon: Optional[float] = Field(None, ge=-180, le=180)
+    courseDeg: Optional[float] = None
+    sats: int = 0
+
+
+class TelemetryHeartbeat(BaseModel):
+    """Heartbeat POSTed by the QNX traffic-AI app (ai-camera-app).
+
+    Field names intentionally match the device payload verbatim. `seq` and
+    `uptimeMs` let the server detect gaps and reboots; a heartbeat stream
+    that stops while the rider was moving is the crash signal.
+    """
+
+    device: str = Field(..., description="Device identifier, e.g. qnx-traffic-ai")
+    seq: int = Field(..., ge=0, description="Monotonic heartbeat sequence number")
+    uptimeMs: int = Field(..., ge=0, description="Milliseconds since app start")
+    speedKmh: float = Field(-1.0, description="Rider speed; negative = unknown")
+    trafficLight: str = Field("", description="Detected light: RED/YELLOW/GREEN/UNKNOWN")
+    alert: str = Field("", description="Active rider alert text; empty = none")
+    gps: TelemetryGps = Field(default_factory=TelemetryGps)
+
+
+class TelemetryStatus(BaseModel):
+    """Latest heartbeat for a device plus server-side bookkeeping."""
+
+    heartbeat: TelemetryHeartbeat
+    received_at: datetime
+    missed_heartbeats: int = Field(
+        0, description="Sequence numbers skipped since the previous heartbeat"
+    )
+    crash_suspected: bool = Field(
+        False, description="Set when heartbeats stopped while the rider was moving"
+    )
