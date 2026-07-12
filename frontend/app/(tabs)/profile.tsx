@@ -1,4 +1,4 @@
-import { Linking, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { StatusChip } from '@/src/components/StatusChip';
 import { useTelemetry } from '@/src/context/TelemetryContext';
@@ -19,7 +19,10 @@ export default function ProfileScreen() {
   };
 
   return (
-    <View style={styles.screen}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled">
       <Text style={styles.heading}>Device & rider</Text>
       <Text style={styles.sub}>CuRiding safety unit paired to this phone.</Text>
 
@@ -75,7 +78,7 @@ export default function ProfileScreen() {
           monitors GPS, speed, and safety events.
         </Text>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -83,8 +86,11 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: theme.colors.background,
+  },
+  content: {
     padding: theme.spacing.md,
     gap: 12,
+    paddingBottom: 32,
   },
   heading: {
     fontSize: 24,
