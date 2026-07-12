@@ -219,3 +219,7 @@ __marimo__/
 
 # Find My tag keys (private key lives here, mounted into the server container)
 secrets/
+
+# recorded camera clips (crash + manual)
+clips/
+server/clips/

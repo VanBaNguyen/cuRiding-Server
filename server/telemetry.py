@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 
 from config import settings
 from models import DeviceEvent, EventType, GPSData, TelemetryHeartbeat, TelemetryStatus
+from recordings import recorder
 from store import gps_store, manager
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,8 @@ class TelemetryStore:
                     speed=max(status.heartbeat.speedKmh, 0.0) / 3.6,
                 )
             )
+            # save the pre-crash camera footage as a clip
+            await recorder.make_crash_clip("crash")
 
 
 async def crash_watchdog(store: "TelemetryStore") -> None:

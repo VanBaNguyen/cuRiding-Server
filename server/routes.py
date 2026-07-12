@@ -13,10 +13,14 @@ from models import (
     GPSResponse,
     NMEARequest,
     DeviceEvent,
+    EventType,
     TelemetryHeartbeat,
     TelemetryStatus,
 )
+import base64
+
 from nmea import parse_nmea
+from recordings import clips_channel, recorder
 from snapshots import channel_for, snapshot_store
 from store import gps_store, manager
 from telemetry import telemetry_store
@@ -291,12 +295,117 @@ async def ingest_snapshot(request: Request) -> dict:
     if len(body) > MAX_SNAPSHOT_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "snapshot too large")
     subscribers = await snapshot_store.update(settings.app_device_id, body)
+    # feed the rolling pre-crash buffer / any active recording
+    await recorder.on_frame(body)
     return {
         "status": "ok",
         "device_id": settings.app_device_id,
         "bytes": len(body),
         "subscribers": subscribers,
     }
+
+
+# ---------------------------------------------------------------------------
+# Clips — crash recordings + manual "record" button from the phone
+# ---------------------------------------------------------------------------
+
+
+@router.post("/recording/start", status_code=status.HTTP_201_CREATED)
+async def recording_start() -> dict:
+    """Phone 'record' button: begin capturing camera frames into a clip.
+
+    The recording is seeded with the pre-crash buffer, so it includes a few
+    seconds of footage from just before the button was pressed.
+    """
+    started = await recorder.start_recording()
+    return {"status": "recording" if started else "already_recording"}
+
+
+@router.post("/recording/stop", status_code=status.HTTP_201_CREATED)
+async def recording_stop() -> dict:
+    """Phone 'stop' button: finish the recording and save it as a clip."""
+    clip_id = await recorder.stop_recording()
+    if clip_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "not recording (or no frames)")
+    return {"status": "saved", "clip_id": clip_id}
+
+
+@router.get("/recording")
+async def recording_state() -> dict:
+    """Whether a manual recording is currently in progress."""
+    return {"recording": recorder.is_recording()}
+
+
+@router.post("/crash/simulate", status_code=status.HTTP_201_CREATED)
+async def crash_simulate() -> dict:
+    """Trigger a simulated crash: save the pre-crash buffer as a clip and
+    broadcast a crash event, exactly as a real detected crash would."""
+    clip_id = await recorder.make_crash_clip("crash-sim")
+    await gps_store.broadcast_event(
+        DeviceEvent(
+            device_id=settings.app_device_id,
+            event_type=EventType.CRASH,
+            message="simulated crash",
+        )
+    )
+    return {"status": "ok", "clip_id": clip_id}
+
+
+@router.get("/clips")
+async def list_clips() -> list[dict]:
+    """List saved clips (crash + manual), newest first."""
+    return recorder.list_clips()
+
+
+@router.get("/clips/{clip_id}")
+async def get_clip(clip_id: str) -> dict:
+    """Clip metadata (reason, time, frame count, duration)."""
+    meta = recorder.get_meta(clip_id)
+    if meta is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no clip '{clip_id}'")
+    return meta
+
+
+@router.get("/clips/{clip_id}/frames")
+async def get_clip_frames(clip_id: str) -> dict:
+    """All frames of a clip as base64 JPEGs, for WSS-only playback in the app."""
+    frames = recorder.read_frames(clip_id)
+    if frames is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no clip '{clip_id}'")
+    return {
+        "clip_id": clip_id,
+        "frame_count": len(frames),
+        "frames": [base64.b64encode(frame).decode() for frame in frames],
+    }
+
+
+@router.get("/clips/{clip_id}/frame/{index}")
+async def get_clip_frame(clip_id: str, index: int) -> Response:
+    """A single clip frame as image/jpeg (for a plain <img> URI)."""
+    path = recorder.frame_path(clip_id, index)
+    if path is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such frame")
+    with open(path, "rb") as handle:
+        return Response(content=handle.read(), media_type="image/jpeg")
+
+
+@router.websocket("/ws/clips")
+async def clips_websocket(websocket: WebSocket) -> None:
+    """Notify the app when a new clip is saved (crash or manual).
+
+    Sends the current clip list on connect, then a {"type": "clip", ...}
+    message each time a clip is created.
+    """
+    channel = clips_channel(settings.app_device_id)
+    await manager.subscribe(channel, websocket)
+    await websocket.send_json({"type": "clips", "clips": recorder.list_clips()})
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        logger.info("Clips WebSocket client disconnected")
+    finally:
+        manager.unsubscribe(channel, websocket)
 
 
 @router.get("/snapshot")

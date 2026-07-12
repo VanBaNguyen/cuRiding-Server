@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     # how often the status WebSocket pushes a fresh summary
     status_push_s: float = 2.0
 
+    # Camera clips / crash recording.
+    # Rolling pre-crash buffer: how many recent camera frames to keep so a
+    # crash clip includes the footage from just before the crash. At the Pi's
+    # ~2s snapshot interval, 15 frames is ~30s of pre-crash footage.
+    precrash_frames: int = 15
+    # where clips are stored on disk (a dir per clip of frame_*.jpg + meta.json)
+    clips_dir: str = "clips"
+    # keep at most this many clips; oldest are pruned
+    max_clips: int = 50
+
     # Find My integration via macless-haystack. Leave haystack_url empty to
     # disable. haystack_keyfile is the generate_keys.py PREFIX.keys output
     # (contains the tag's private key — mount it, never commit it).
