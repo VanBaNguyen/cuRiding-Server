@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
+import { CrashCountdown } from '@/src/components/CrashCountdown';
 import DeviceMap from '@/src/components/DeviceMap';
 import { SpeedBadge } from '@/src/components/SpeedBadge';
 import { StatusChip } from '@/src/components/StatusChip';
@@ -7,8 +8,8 @@ import { useTelemetry } from '@/src/context/TelemetryContext';
 import { theme } from '@/src/theme';
 
 export default function LiveMapScreen() {
-  const { live, trail, focusEvent, setFocusEvent } = useTelemetry();
-  const showEmergencyBanner = live.status === 'emergency';
+  const { live, trail, focusEvent, setFocusEvent, crashCountdown } = useTelemetry();
+  const showEmergencyBanner = live.status === 'emergency' && !crashCountdown.active;
 
   return (
     <View style={styles.container}>
@@ -33,7 +34,7 @@ export default function LiveMapScreen() {
           <View style={styles.banner}>
             <Text style={styles.bannerTitle}>Emergency protocol active</Text>
             <Text style={styles.bannerBody}>
-              Violent crash simulated — QNX would contact 911 with this GPS fix.
+              Crash detected — emergency services were contacted.
             </Text>
           </View>
         ) : null}
@@ -52,6 +53,8 @@ export default function LiveMapScreen() {
           </View>
         </View>
       </View>
+
+      <CrashCountdown />
     </View>
   );
 }

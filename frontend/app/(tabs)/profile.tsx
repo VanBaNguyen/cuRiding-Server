@@ -1,11 +1,22 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { StatusChip } from '@/src/components/StatusChip';
 import { useTelemetry } from '@/src/context/TelemetryContext';
 import { theme } from '@/src/theme';
 
 export default function ProfileScreen() {
-  const { device, live } = useTelemetry();
+  const { device, live, emergencyNumber, setEmergencyNumber } = useTelemetry();
+
+  const handleCallEmergency = () => {
+    const phoneUrl = Platform.select({
+      ios: `tel:${emergencyNumber}`,
+      android: `tel:${emergencyNumber}`,
+      default: `tel:${emergencyNumber}`,
+    });
+    Linking.openURL(phoneUrl).catch((err) =>
+      console.error('Failed to open dialer:', err),
+    );
+  };
 
   return (
     <View style={styles.screen}>
@@ -27,16 +38,40 @@ export default function ProfileScreen() {
         <Text style={styles.body}>{device.hardware}</Text>
 
         <Text style={styles.label}>Pairing</Text>
-        <Text style={[styles.value, { color: theme.colors.success }]}>
-          {device.paired ? 'Paired (mock)' : 'Not paired'}
+        <Text style={[styles.value, { color: device.paired ? theme.colors.success : theme.colors.danger }]}>
+          {device.paired ? 'Paired' : 'Not paired'}
         </Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Emergency contact</Text>
+        <Text style={styles.body}>
+          This number will be dialed automatically if a crash is detected and
+          the 30-second countdown expires without cancellation.
+        </Text>
+        <View style={styles.emergencyRow}>
+          <TextInput
+            style={styles.emergencyInput}
+            value={emergencyNumber}
+            onChangeText={setEmergencyNumber}
+            keyboardType="phone-pad"
+            placeholder="911"
+            placeholderTextColor={theme.colors.slateMuted}
+          />
+          <Pressable
+            onPress={handleCallEmergency}
+            style={({ pressed }) => [styles.callButton, pressed && styles.callButtonPressed]}
+          >
+            <Text style={styles.callButtonText}>📞 Call</Text>
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>On-vehicle stack</Text>
         <Text style={styles.body}>
           Raspberry Pi 5 runs vision AI on Camera Module 3. QNX handles hard real-time
-          decisions: auto-brake on risk, and 911 contact after a violent crash. This app
+          decisions: auto-brake on risk, and emergency contact after a violent crash. This app
           monitors GPS, speed, and safety events.
         </Text>
       </View>
@@ -102,5 +137,37 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: theme.colors.slate,
     marginBottom: 4,
+  },
+  emergencyRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  emergencyInput: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 18,
+    fontWeight: '700',
+    color: theme.colors.slate,
+  },
+  callButton: {
+    backgroundColor: theme.colors.danger,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  callButtonPressed: {
+    opacity: 0.8,
+  },
+  callButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });

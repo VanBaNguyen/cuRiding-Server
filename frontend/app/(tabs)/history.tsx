@@ -57,15 +57,25 @@ export default function HistoryScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.heading}>Ride history</Text>
-      <Text style={styles.sub}>Speed and distance from the CuRiding unit (mock data).</Text>
-      {rides.map((ride) => (
-        <RideCard
-          key={ride.id}
-          ride={ride}
-          selected={selectedId === ride.id}
-          onPress={() => setSelectedId(selectedId === ride.id ? null : ride.id)}
-        />
-      ))}
+      <Text style={styles.sub}>Speed and distance from the CuRiding unit.</Text>
+      {rides.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyIcon}>🚲</Text>
+          <Text style={styles.emptyTitle}>No rides yet</Text>
+          <Text style={styles.emptyBody}>
+            Ride data will appear here once the CuRiding unit records a trip.
+          </Text>
+        </View>
+      ) : (
+        rides.map((ride) => (
+          <RideCard
+            key={ride.id}
+            ride={ride}
+            selected={selectedId === ride.id}
+            onPress={() => setSelectedId(selectedId === ride.id ? null : ride.id)}
+          />
+        ))
+      )}
     </ScrollView>
   );
 }
@@ -124,5 +134,26 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: theme.colors.slate,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 48,
+    gap: 8,
+  },
+  emptyIcon: {
+    fontSize: 40,
+    marginBottom: 4,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: theme.colors.slate,
+  },
+  emptyBody: {
+    fontSize: 14,
+    color: theme.colors.slateMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+    maxWidth: 280,
   },
 });

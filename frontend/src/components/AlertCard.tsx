@@ -42,7 +42,7 @@ export function AlertCard({
       <View style={styles.footer}>
         <Text style={styles.time}>{formatWhen(event.timestamp)}</Text>
         {event.emergencyCalled ? (
-          <Text style={styles.emergency}>911 contacted</Text>
+          <Text style={styles.emergency}>Emergency called</Text>
         ) : null}
       </View>
     </Pressable>
