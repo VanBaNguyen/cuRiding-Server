@@ -1,26 +1,37 @@
 # cuRiding-Server
 
-GPS relay server for cuRiding. Receives real-time GPS coordinates from Raspberry Pi 5 devices running QNX and pushes them to a React Native mobile app.
+GPS relay server for cuRiding. Receives real-time GPS coordinates and events from Raspberry Pi 5 devices running QNX and pushes them to a React Native mobile app.
 
 ## Architecture
 
 ```
-RPi 5 (QNX) --POST /api/v1/gps--> FastAPI Server --WebSocket /api/v1/ws/gps/{device_id}--> React Native App
+RPi 5 (QNX) --POST /api/v1/gps/nmea--> FastAPI Server --WebSocket /api/v1/ws/gps/{device_id}--> React Native App
 ```
 
-The Pi posts GPS readings over HTTP. The server stores the latest position per device in memory and immediately broadcasts it to any connected WebSocket clients. A polling endpoint is also available as a fallback.
+The Pi posts raw NMEA sentences or structured GPS data over HTTP. The server stores the latest position per device in memory and immediately broadcasts it to any connected WebSocket clients. A polling endpoint is also available as a fallback.
 
 ## Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/v1/gps` | Receive GPS data from a Pi |
+| POST | `/api/v1/gps` | Receive structured GPS data |
+| POST | `/api/v1/gps/nmea` | Receive and parse raw NMEA sentences |
+| POST | `/api/v1/events` | Receive device events (e.g., crash detection) |
 | GET | `/api/v1/gps/{device_id}/latest` | Get last known location |
 | GET | `/api/v1/gps/devices` | List all active devices |
-| WS | `/api/v1/ws/gps/{device_id}` | Real-time GPS stream |
+| WS | `/api/v1/ws/gps/{device_id}` | Real-time GPS and event stream |
 | GET | `/health` | Liveness check |
 
 ## Setup
+
+### Using Docker (Recommended)
+
+```bash
+docker compose up -d
+```
+The server will be available at `http://localhost:8000`.
+
+### Manual Setup
 
 ```bash
 cd server
@@ -31,38 +42,28 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Server starts on `http://0.0.0.0:8000`. API docs at `/docs`.
+API documentation is automatically generated at `http://localhost:8000/docs`.
 
-## GPS Payload
+## CI/CD
 
-```json
-{
-  "device_id": "pi-001",
-  "latitude": 45.5017,
-  "longitude": -73.5673,
-  "altitude": 50.0,
-  "speed": 0.0,
-  "heading": 0.0,
-  "accuracy": 2.5,
-  "timestamp": "2026-07-11T21:00:00Z"
-}
-```
-
-`altitude`, `speed`, `heading`, `accuracy`, and `timestamp` are optional.
+A GitHub Actions workflow is configured to automatically build and push the Docker image to the GitHub Container Registry (GHCR) on pushes to the `main` branch.
 
 ## Pi Client
 
-See `server/examples/qnx_client_example.py` for a stdlib-only Python script that posts GPS data to the server. No pip dependencies required on QNX.
+See `server/examples/qnx_client_example.c` for a POSIX C client (no dependencies) and `server/examples/qnx_client_example.py` for a stdlib-only Python client. Both scripts read NMEA data from the serial port and POST it to the server.
 
 ## Project Structure
 
 ```
+.github/workflows/   - CI/CD pipelines
+docker-compose.yml   - Docker compose configuration
 server/
-  main.py        - FastAPI app, CORS, uvicorn
-  config.py      - Settings from .env
-  models.py      - Pydantic GPS models
-  store.py       - In-memory store + WebSocket manager
-  routes.py      - All API endpoints
-  examples/
-    qnx_client_example.py
+  Dockerfile         - Docker image definition
+  main.py            - FastAPI app, CORS, uvicorn
+  config.py          - Settings from .env
+  models.py          - Pydantic GPS models
+  store.py           - In-memory store + WebSocket manager
+  routes.py          - All API endpoints
+  nmea.py            - NMEA sentence parser
+  examples/          - C and Python QNX clients
 ```
