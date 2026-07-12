@@ -196,6 +196,11 @@ async def gps_websocket(websocket: WebSocket, device_id: str) -> None:
     "type" field; events have "type": "event".
     """
     await manager.subscribe(device_id, websocket)
+    # seed the client with the last known position immediately so the map is
+    # not blank until the next update arrives (WebSocket-only apps rely on this)
+    latest = gps_store.get_latest(device_id)
+    if latest is not None:
+        await websocket.send_json(latest.model_dump(mode="json"))
     try:
         while True:
             await websocket.receive_text()
