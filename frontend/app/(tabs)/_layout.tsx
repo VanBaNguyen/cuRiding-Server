@@ -8,20 +8,38 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.slateMuted,
+        tabBarActiveTintColor: theme.colors.red,
+        tabBarInactiveTintColor: theme.colors.inkMuted,
         tabBarStyle: {
           backgroundColor: theme.colors.surface,
           borderTopColor: theme.colors.border,
+          borderTopWidth: 1,
         },
-        headerStyle: { backgroundColor: theme.colors.surface },
-        headerTitleStyle: { fontWeight: '700', color: theme.colors.slate },
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontWeight: '700',
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+        },
+        headerStyle: {
+          backgroundColor: theme.colors.background,
+          borderBottomColor: theme.colors.border,
+          borderBottomWidth: 1,
+          shadowColor: 'transparent',
+        },
+        headerTintColor: theme.colors.ink,
+        headerTitleStyle: {
+          fontWeight: '800',
+          color: theme.colors.ink,
+          letterSpacing: 0.3,
+        },
         headerShown: useClientOnlyValue(false, true),
       }}>
       <Tabs.Screen
         name="index"
         options={{
           title: 'Live Map',
+          headerShown: false,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="map" size={size ?? 24} color={color} />
           ),
@@ -30,9 +48,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="history"
         options={{
-          title: 'History',
+          title: 'Clips',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="bar-chart" size={size ?? 24} color={color} />
+            <Ionicons name="videocam" size={size ?? 24} color={color} />
           ),
         }}
       />

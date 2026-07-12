@@ -3,18 +3,16 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { theme } from '@/src/theme';
 import type { SafetyEvent, SafetyEventType } from '@/src/types/device';
 
-const typeMeta: Record<
-  SafetyEventType,
-  { label: string; color: string; bg: string }
-> = {
-  crash: { label: 'Crash', color: theme.colors.danger, bg: theme.colors.emergencyBg },
-  auto_brake: { label: 'Auto-brake', color: theme.colors.braking, bg: theme.colors.brakingBg },
-  ai_warning: { label: 'AI warning', color: theme.colors.warning, bg: theme.colors.warningBg },
+const typeMeta: Record<SafetyEventType, { label: string; color: string }> = {
+  crash: { label: 'Crash', color: theme.colors.danger },
+  custom: { label: 'Rider alert', color: theme.colors.warning },
+  low_battery: { label: 'Low battery', color: theme.colors.warning },
+  geofence_exit: { label: 'Geofence', color: theme.colors.warning },
+  device_offline: { label: 'Offline', color: theme.colors.inkMuted },
 };
 
 function formatWhen(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, {
+  return new Date(iso).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -30,67 +28,90 @@ export function AlertCard({
   onPress?: () => void;
 }) {
   const meta = typeMeta[event.type];
+
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.card, { opacity: pressed ? 0.85 : 1 }]}>
-      <View style={[styles.badge, { backgroundColor: meta.bg }]}>
-        <Text style={[styles.badgeText, { color: meta.color }]}>{meta.label}</Text>
-      </View>
-      <Text style={styles.title}>{event.title}</Text>
-      <Text style={styles.message}>{event.message}</Text>
-      <View style={styles.footer}>
-        <Text style={styles.time}>{formatWhen(event.timestamp)}</Text>
-        {event.emergencyCalled ? (
-          <Text style={styles.emergency}>Emergency called</Text>
-        ) : null}
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
+      <View style={[styles.marker, { backgroundColor: meta.color }]} />
+      <View style={styles.body}>
+        <View style={styles.topLine}>
+          <Text style={[styles.type, { color: meta.color }]}>{meta.label}</Text>
+          <Text style={styles.time}>{formatWhen(event.timestamp)}</Text>
+        </View>
+        <Text style={styles.title}>{event.title}</Text>
+        <Text style={styles.message} numberOfLines={2}>
+          {event.message}
+        </Text>
+        <View style={styles.footer}>
+          {event.emergencyCalled ? (
+            <Text style={styles.emergency}>911 called</Text>
+          ) : (
+            <Text style={styles.action}>View on map</Text>
+          )}
+        </View>
       </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    gap: 6,
+  row: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    paddingVertical: 14,
+    paddingRight: 18,
   },
-  badge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+  rowPressed: {
+    opacity: 0.75,
   },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '700',
+  marker: {
+    width: 3,
+    marginRight: 14,
+    borderRadius: 1,
   },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: theme.colors.slate,
+  body: {
+    flex: 1,
+    gap: 3,
   },
-  message: {
-    fontSize: 14,
-    color: theme.colors.slateMuted,
-    lineHeight: 20,
-  },
-  footer: {
-    marginTop: 4,
+  topLine: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'baseline',
+    gap: 8,
+  },
+  type: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
   time: {
-    fontSize: 12,
-    color: theme.colors.slateMuted,
+    fontFamily: theme.fonts.mono,
+    fontSize: 11,
+    color: theme.colors.inkFaint,
+  },
+  title: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: theme.colors.ink,
+  },
+  message: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: theme.colors.inkMuted,
+  },
+  footer: {
+    marginTop: 2,
   },
   emergency: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
-    color: theme.colors.danger,
+    color: theme.colors.redBright,
+  },
+  action: {
+    fontSize: 11,
+    color: theme.colors.inkFaint,
   },
 });

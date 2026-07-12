@@ -120,7 +120,7 @@ export function CrashCountdown() {
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(153, 27, 27, 0.95)',
+    backgroundColor: 'rgba(120, 10, 26, 0.97)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1000,
@@ -156,10 +156,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   countdownNumber: {
-    fontSize: 64,
-    fontWeight: '900',
+    fontFamily: theme.fonts.mono,
+    fontSize: 60,
     color: '#FFFFFF',
-    lineHeight: 72,
+    lineHeight: 68,
   },
   countdownLabel: {
     fontSize: 14,
@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
   okButtonText: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#991B1B',
+    color: theme.colors.redDeep,
   },
   callNowButton: {
     backgroundColor: 'transparent',

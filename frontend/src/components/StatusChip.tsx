@@ -17,10 +17,10 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
+    gap: 7,
+    paddingHorizontal: 11,
     paddingVertical: 6,
-    borderRadius: 999,
+    borderRadius: theme.radius.pill,
     borderWidth: 1,
   },
   dot: {
@@ -29,7 +29,9 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   label: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
 });

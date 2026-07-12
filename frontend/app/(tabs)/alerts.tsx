@@ -21,45 +21,40 @@ export default function AlertsScreen() {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <View style={styles.headerRow}>
-        <View style={styles.headerText}>
-          <Text style={styles.heading}>Safety alerts</Text>
-          <Text style={styles.sub}>
-            AI warnings, auto-brake events, and crash protocol from the on-vehicle QNX unit.
+    <View style={styles.screen}>
+      {events.length > 0 ? (
+        <View style={styles.toolbar}>
+          <Text style={styles.count}>
+            {events.length} {events.length === 1 ? 'event' : 'events'}
           </Text>
-        </View>
-        {events.length > 0 ? (
-          <Pressable
-            onPress={handleClearHistory}
-            style={({ pressed }) => [styles.clearButton, pressed && styles.clearButtonPressed]}
-          >
-            <Text style={styles.clearButtonText}>Clear</Text>
+          <Pressable onPress={handleClearHistory} hitSlop={8}>
+            <Text style={styles.clear}>Clear</Text>
           </Pressable>
-        ) : null}
-      </View>
-
-      {events.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyIcon}>✓</Text>
-          <Text style={styles.emptyTitle}>No alerts</Text>
-          <Text style={styles.emptyBody}>
-            Safety events from the QNX unit will appear here in real time.
-          </Text>
         </View>
-      ) : (
-        events.map((event) => (
-          <AlertCard
-            key={event.id}
-            event={event}
-            onPress={() => {
-              setFocusEvent(event);
-              router.push('/');
-            }}
-          />
-        ))
-      )}
-    </ScrollView>
+      ) : null}
+
+      <ScrollView contentContainerStyle={styles.content}>
+        {events.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>All clear</Text>
+            <Text style={styles.emptyBody}>
+              Crash, rider alerts, and device events from the unit appear here as they happen.
+            </Text>
+          </View>
+        ) : (
+          events.map((event) => (
+            <AlertCard
+              key={event.id}
+              event={event}
+              onPress={() => {
+                setFocusEvent(event);
+                router.push('/');
+              }}
+            />
+          ))
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -68,68 +63,42 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
-  content: {
-    padding: theme.spacing.md,
-    gap: 12,
-    paddingBottom: 32,
-  },
-  headerRow: {
+  toolbar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  headerText: {
-    flex: 1,
-  },
-  heading: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: theme.colors.slate,
-  },
-  sub: {
-    fontSize: 14,
-    color: theme.colors.slateMuted,
-    marginBottom: 4,
-    lineHeight: 20,
-  },
-  clearButton: {
-    backgroundColor: theme.colors.emergencyBg,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: theme.colors.danger,
-    marginTop: 2,
-  },
-  clearButtonPressed: {
-    opacity: 0.7,
-  },
-  clearButtonText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: theme.colors.danger,
-  },
-  emptyState: {
     alignItems: 'center',
-    paddingVertical: 48,
-    gap: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
   },
-  emptyIcon: {
-    fontSize: 40,
-    color: theme.colors.success,
-    marginBottom: 4,
+  count: {
+    fontFamily: theme.fonts.mono,
+    fontSize: 12,
+    color: theme.colors.inkMuted,
+  },
+  clear: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.colors.redBright,
+  },
+  content: {
+    paddingBottom: 24,
+  },
+  empty: {
+    paddingHorizontal: 18,
+    paddingTop: 48,
+    gap: 6,
   },
   emptyTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
-    color: theme.colors.slate,
+    color: theme.colors.ink,
   },
   emptyBody: {
     fontSize: 14,
-    color: theme.colors.slateMuted,
-    textAlign: 'center',
     lineHeight: 20,
-    maxWidth: 280,
+    color: theme.colors.inkMuted,
+    maxWidth: 300,
   },
 });

@@ -1,12 +1,29 @@
 """API routes for GPS ingest and relay."""
 
+import asyncio
 import logging
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import Response
 
-from models import GPSData, GPSResponse, NMEARequest, DeviceEvent
+from config import settings
+from models import (
+    GPSData,
+    GPSResponse,
+    NMEARequest,
+    DeviceEvent,
+    EventType,
+    TelemetryHeartbeat,
+    TelemetryStatus,
+)
+import base64
+
 from nmea import parse_nmea
+from recordings import clips_channel, recorder
+from snapshots import channel_for, snapshot_store
 from store import gps_store, manager
+from telemetry import telemetry_store
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +95,131 @@ async def ingest_nmea(
 
 
 # ---------------------------------------------------------------------------
+# Status — freshness of the live data (for a dashboard / connectivity check)
+# ---------------------------------------------------------------------------
+
+
+def _age_seconds(when: datetime, now: datetime) -> float:
+    """Seconds between a stored timestamp and now, tolerant of naive UTC."""
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return round((now - when).total_seconds(), 1)
+
+
+def build_status() -> dict:
+    """Snapshot of how fresh the live data is: last heartbeat and last position.
+
+    - `heartbeat` is the most recent Pi heartbeat (aliveness / crash source).
+    - `position` is the last known location of the app device (Find My tag
+      or a GPS module).
+    - `online` is true when a heartbeat arrived within heartbeat_online_s.
+    Each carries an `age_seconds` so a client can show "updated Ns ago".
+    """
+    now = datetime.now(timezone.utc)
+    app_id = settings.app_device_id
+
+    position = None
+    pos = gps_store.get_latest(app_id)
+    if pos is not None:
+        position = {
+            "last_update": pos.timestamp.isoformat(),
+            "age_seconds": _age_seconds(pos.timestamp, now),
+            "latitude": pos.latitude,
+            "longitude": pos.longitude,
+        }
+
+    heartbeat = None
+    hb = telemetry_store.most_recent()
+    if hb is not None:
+        heartbeat = {
+            "device": hb.heartbeat.device,
+            "last_heartbeat": hb.received_at.isoformat(),
+            "age_seconds": _age_seconds(hb.received_at, now),
+            "seq": hb.heartbeat.seq,
+            "speedKmh": hb.heartbeat.speedKmh,
+            "alert": hb.heartbeat.alert,
+            "crash_suspected": hb.crash_suspected,
+        }
+
+    online = heartbeat is not None and heartbeat["age_seconds"] <= settings.heartbeat_online_s
+    return {
+        "type": "status",
+        "app_device_id": app_id,
+        "name": settings.app_device_name,
+        "hardware": settings.app_device_hardware,
+        "server_time": now.isoformat(),
+        "online": online,
+        "heartbeat": heartbeat,
+        "position": position,
+    }
+
+
+@router.get("/status")
+async def status_summary() -> dict:
+    """Convenience HTTP snapshot of build_status() (same data as the WS)."""
+    return build_status()
+
+
+@router.websocket("/ws/status")
+async def status_websocket(websocket: WebSocket) -> None:
+    """Stream the freshness summary over WebSocket (WSS through the tunnel).
+
+    Sends a status frame on connect and then every status_push_s seconds, so a
+    dashboard can show live "last heartbeat / last position" ages without any
+    HTTP polling. Each frame carries "type": "status".
+    """
+    await websocket.accept()
+    try:
+        while True:
+            await websocket.send_json(build_status())
+            await asyncio.sleep(settings.status_push_s)
+    except (WebSocketDisconnect, RuntimeError):
+        logger.info("Status WebSocket client disconnected")
+
+
+# ---------------------------------------------------------------------------
+# Telemetry — heartbeats from the QNX traffic-AI app
+# ---------------------------------------------------------------------------
+
+
+@router.post("/telemetry", status_code=status.HTTP_201_CREATED)
+async def ingest_telemetry(heartbeat: TelemetryHeartbeat) -> dict:
+    """Receive a telemetry heartbeat from the Pi.
+
+    The heartbeat is stored, relayed to WebSocket subscribers (as
+    "type": "telemetry"), any embedded GPS fix is mirrored into the GPS
+    store, and a newly raised rider alert is broadcast as an event. The
+    crash watchdog uses the heartbeat cadence: a stream that stops while
+    the rider was moving raises a crash event.
+    """
+    subscribers = await telemetry_store.update(heartbeat)
+    return {
+        "status": "ok",
+        "device": heartbeat.device,
+        "seq": heartbeat.seq,
+        "subscribers": subscribers,
+    }
+
+
+@router.get("/telemetry/{device_id}/latest", response_model=TelemetryStatus)
+async def get_latest_telemetry(device_id: str) -> TelemetryStatus:
+    """Return the most recent heartbeat (and crash state) for a device."""
+    latest = telemetry_store.get_latest(device_id)
+    if latest is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No telemetry for device '{device_id}'",
+        )
+    return latest
+
+
+@router.get("/telemetry/devices")
+async def list_telemetry_devices() -> list[dict]:
+    """Return heartbeat status for all devices that have reported."""
+    return telemetry_store.list_devices()
+
+
+# ---------------------------------------------------------------------------
 # Events — crash detection, alerts, etc.
 # ---------------------------------------------------------------------------
 
@@ -133,6 +275,152 @@ async def list_devices() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Camera snapshots — the Pi POSTs a JPEG every few seconds
+# ---------------------------------------------------------------------------
+
+MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
+
+
+@router.post("/snapshot", status_code=status.HTTP_201_CREATED)
+async def ingest_snapshot(request: Request) -> dict:
+    """Receive a JPEG frame (raw image/jpeg body) from the Pi camera."""
+    body = await request.body()
+    if not body:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty snapshot body")
+    if len(body) > MAX_SNAPSHOT_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "snapshot too large")
+    subscribers = await snapshot_store.update(settings.app_device_id, body)
+    await recorder.on_frame(body)
+    return {
+        "status": "ok",
+        "device_id": settings.app_device_id,
+        "bytes": len(body),
+        "subscribers": subscribers,
+    }
+
+
+@router.get("/snapshot")
+async def get_snapshot() -> Response:
+    """Return the latest camera frame as image/jpeg."""
+    latest = snapshot_store.get_latest(settings.app_device_id)
+    if latest is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no snapshot yet")
+    jpeg, _ = latest
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
+# ---------------------------------------------------------------------------
+# Clips — crash recordings + manual "record" button from the phone
+# ---------------------------------------------------------------------------
+
+
+@router.post("/recording/start", status_code=status.HTTP_201_CREATED)
+async def recording_start() -> dict:
+    """Phone record button: begin capturing camera frames into a clip."""
+    started = await recorder.start_recording()
+    return {"status": "recording" if started else "already_recording"}
+
+
+@router.post("/recording/stop", status_code=status.HTTP_201_CREATED)
+async def recording_stop() -> dict:
+    """Phone stop button: finish the recording and save it as a clip."""
+    clip_id = await recorder.stop_recording()
+    if clip_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "not recording (or no frames)")
+    return {"status": "saved", "clip_id": clip_id}
+
+
+@router.get("/recording")
+async def recording_state() -> dict:
+    """Whether a manual recording is currently in progress."""
+    return {"recording": recorder.is_recording()}
+
+
+@router.post("/crash/simulate", status_code=status.HTTP_201_CREATED)
+async def crash_simulate() -> dict:
+    """Trigger a simulated crash: save pre-crash buffer and broadcast event."""
+    clip_id = await recorder.make_crash_clip("crash-sim")
+    await gps_store.broadcast_event(
+        DeviceEvent(
+            device_id=settings.app_device_id,
+            event_type=EventType.CRASH,
+            message="simulated crash",
+        )
+    )
+    return {"status": "ok", "clip_id": clip_id}
+
+
+@router.get("/clips")
+async def list_clips() -> list[dict]:
+    """List saved clips (crash + manual), newest first."""
+    return recorder.list_clips()
+
+
+@router.get("/clips/{clip_id}")
+async def get_clip(clip_id: str) -> dict:
+    """Clip metadata (reason, time, frame count, duration)."""
+    meta = recorder.get_meta(clip_id)
+    if meta is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no clip '{clip_id}'")
+    return meta
+
+
+@router.get("/clips/{clip_id}/frames")
+async def get_clip_frames(clip_id: str) -> dict:
+    """All frames of a clip as base64 JPEGs."""
+    frames = recorder.read_frames(clip_id)
+    if frames is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no clip '{clip_id}'")
+    return {
+        "clip_id": clip_id,
+        "frame_count": len(frames),
+        "frames": [base64.b64encode(frame).decode() for frame in frames],
+    }
+
+
+@router.get("/clips/{clip_id}/frame/{index}")
+async def get_clip_frame(clip_id: str, index: int) -> Response:
+    """A single clip frame as image/jpeg."""
+    path = recorder.frame_path(clip_id, index)
+    if path is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such frame")
+    with open(path, "rb") as handle:
+        return Response(content=handle.read(), media_type="image/jpeg")
+
+
+@router.websocket("/ws/clips")
+async def clips_websocket(websocket: WebSocket) -> None:
+    """Notify the app when a new clip is saved."""
+    channel = clips_channel(settings.app_device_id)
+    await manager.subscribe(channel, websocket)
+    await websocket.send_json({"type": "clips", "clips": recorder.list_clips()})
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        logger.info("Clips WebSocket client disconnected")
+    finally:
+        manager.unsubscribe(channel, websocket)
+
+
+@router.websocket("/ws/snapshot")
+async def snapshot_websocket(websocket: WebSocket) -> None:
+    """Stream camera snapshots over WebSocket as base64 JPEG frames."""
+    channel = channel_for(settings.app_device_id)
+    await manager.subscribe(channel, websocket)
+    seed = snapshot_store.latest_message(settings.app_device_id)
+    if seed is not None:
+        await websocket.send_json(seed)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        logger.info("Snapshot WebSocket client disconnected")
+    finally:
+        manager.unsubscribe(channel, websocket)
+
+
+# ---------------------------------------------------------------------------
 # WebSocket — real-time relay to React Native app
 # ---------------------------------------------------------------------------
 
@@ -146,6 +434,11 @@ async def gps_websocket(websocket: WebSocket, device_id: str) -> None:
     "type" field; events have "type": "event".
     """
     await manager.subscribe(device_id, websocket)
+    # seed the client with the last known position immediately so the map is
+    # not blank until the next update arrives (WebSocket-only apps rely on this)
+    latest = gps_store.get_latest(device_id)
+    if latest is not None:
+        await websocket.send_json(latest.model_dump(mode="json"))
     try:
         while True:
             await websocket.receive_text()

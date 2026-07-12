@@ -1,20 +1,37 @@
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { StatusChip } from '@/src/components/StatusChip';
 import { useTelemetry } from '@/src/context/TelemetryContext';
-import { theme } from '@/src/theme';
+import { statusColors, statusLabels, theme } from '@/src/theme';
+import type { DeviceStatus } from '@/src/types/device';
+function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <View style={styles.infoRow}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={[styles.infoValue, mono && styles.mono]}>{value}</Text>
+    </View>
+  );
+}
 
 export default function ProfileScreen() {
-  const { device, live, emergencyNumber, setEmergencyNumber } = useTelemetry();
+  const { device, live, deviceStatus, emergencyNumber, setEmergencyNumber, simulateCrash } =
+    useTelemetry();
+  const statusColor = statusColors[live.status] ?? theme.colors.inkMuted;
+  const statusLabel = statusLabels[live.status as DeviceStatus] ?? live.status;
 
   const handleCallEmergency = () => {
-    const phoneUrl = Platform.select({
-      ios: `tel:${emergencyNumber}`,
-      android: `tel:${emergencyNumber}`,
-      default: `tel:${emergencyNumber}`,
-    });
-    Linking.openURL(phoneUrl).catch((err) =>
+    Linking.openURL(`tel:${emergencyNumber}`).catch((err) =>
       console.error('Failed to open dialer:', err),
+    );
+  };
+
+  const handleSimulateCrash = () => {
+    Alert.alert(
+      'Simulate crash',
+      'Start the 30-second emergency countdown? Same flow as a real detected crash.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Simulate', style: 'destructive', onPress: simulateCrash },
+      ],
     );
   };
 
@@ -23,61 +40,84 @@ export default function ProfileScreen() {
       style={styles.screen}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled">
-      <Text style={styles.heading}>Device & rider</Text>
-      <Text style={styles.sub}>CuRiding safety unit paired to this phone.</Text>
-
-      <View style={styles.card}>
-        <View style={styles.row}>
-          <Text style={styles.label}>Rider</Text>
-          <StatusChip status={live.status} />
+      <View style={styles.hero}>
+        <Text style={styles.rider}>{device.riderName}</Text>
+        <View style={styles.unitLine}>
+          <View style={[styles.dot, { backgroundColor: statusColor }]} />
+          <Text style={styles.unitText}>
+            {device.name} · {statusLabel}
+          </Text>
         </View>
-        <Text style={styles.value}>{device.riderName}</Text>
-
-        <Text style={styles.label}>Device</Text>
-        <Text style={styles.value}>{device.name}</Text>
-        <Text style={styles.mono}>{device.id}</Text>
-
-        <Text style={styles.label}>Hardware</Text>
-        <Text style={styles.body}>{device.hardware}</Text>
-
-        <Text style={styles.label}>Pairing</Text>
-        <Text style={[styles.value, { color: device.paired ? theme.colors.success : theme.colors.danger }]}>
-          {device.paired ? 'Paired' : 'Not paired'}
-        </Text>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Emergency contact</Text>
-        <Text style={styles.body}>
-          This number will be dialed automatically if a crash is detected and
-          the 30-second countdown expires without cancellation.
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>Emergency number</Text>
+        <Text style={styles.sectionHint}>
+          Dialed automatically if a crash countdown expires without cancellation.
         </Text>
-        <View style={styles.emergencyRow}>
+        <View style={styles.phoneRow}>
           <TextInput
-            style={styles.emergencyInput}
+            style={styles.phoneInput}
             value={emergencyNumber}
             onChangeText={setEmergencyNumber}
             keyboardType="phone-pad"
             placeholder="911"
-            placeholderTextColor={theme.colors.slateMuted}
+            placeholderTextColor={theme.colors.inkFaint}
           />
-          <Pressable
-            onPress={handleCallEmergency}
-            style={({ pressed }) => [styles.callButton, pressed && styles.callButtonPressed]}
-          >
-            <Text style={styles.callButtonText}>📞 Call</Text>
+          <Pressable onPress={handleCallEmergency} hitSlop={8}>
+            <Text style={styles.callLink}>Call</Text>
           </Pressable>
         </View>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>On-vehicle stack</Text>
-        <Text style={styles.body}>
-          Raspberry Pi 5 runs vision AI on Camera Module 3. QNX handles hard real-time
-          decisions: auto-brake on risk, and emergency contact after a violent crash. This app
-          monitors GPS, speed, and safety events.
-        </Text>
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>Live status</Text>
+        <InfoRow
+          label="Heartbeat"
+          value={
+            deviceStatus.heartbeatAgeSeconds == null
+              ? 'No heartbeat yet'
+              : `${Math.round(deviceStatus.heartbeatAgeSeconds)}s ago · seq ${deviceStatus.heartbeatSeq ?? '—'}`
+          }
+          mono
+        />
+        <InfoRow
+          label="Position fix"
+          value={
+            deviceStatus.positionAgeSeconds == null
+              ? 'No fix yet'
+              : `${Math.round(deviceStatus.positionAgeSeconds)}s ago`
+          }
+          mono
+        />
+        {deviceStatus.activeAlert ? (
+          <InfoRow label="Active alert" value={deviceStatus.activeAlert} />
+        ) : null}
       </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>Unit</Text>
+        <InfoRow label="Hardware" value={device.hardware} />
+        <InfoRow label="ID" value={device.id} mono />
+        <InfoRow label="Pairing" value={device.paired ? 'Paired' : 'Not paired'} />
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>Testing</Text>
+        <Text style={styles.sectionHint}>
+          Demo the crash detection flow without waiting for a real disconnect.
+        </Text>
+        <Pressable
+          onPress={handleSimulateCrash}
+          style={({ pressed }) => [styles.simulateButton, pressed && styles.simulateButtonPressed]}>
+          <Text style={styles.simulateButtonText}>Simulate crash</Text>
+        </Pressable>
+      </View>
+
+      <Text style={styles.footnote}>
+        Position comes from the Find My tag. Heartbeats (~1 Hz) from the Pi drive crash
+        detection and rider alerts. This app tracks live GPS, speed, camera, and safety events.
+      </Text>
     </ScrollView>
   );
 }
@@ -88,92 +128,119 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   content: {
-    padding: theme.spacing.md,
-    gap: 12,
     paddingBottom: 32,
   },
-  heading: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: theme.colors.slate,
-  },
-  sub: {
-    fontSize: 14,
-    color: theme.colors.slateMuted,
-    marginBottom: 4,
-  },
-  card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
+  hero: {
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
     gap: 6,
   },
-  row: {
+  rider: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: theme.colors.ink,
+    letterSpacing: -0.3,
+  },
+  unitLine: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 7,
   },
-  label: {
-    marginTop: 10,
-    fontSize: 12,
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  unitText: {
+    fontSize: 14,
+    color: theme.colors.inkMuted,
+  },
+  section: {
+    paddingHorizontal: 18,
+    paddingTop: 20,
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    paddingBottom: 20,
+  },
+  sectionLabel: {
+    fontSize: 11,
     fontWeight: '700',
-    color: theme.colors.slateMuted,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    color: theme.colors.red,
   },
-  value: {
-    fontSize: 18,
+  sectionHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: theme.colors.inkMuted,
+    marginTop: -4,
+  },
+  phoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    paddingBottom: 8,
+  },
+  phoneInput: {
+    flex: 1,
+    fontFamily: theme.fonts.mono,
+    fontSize: 24,
+    color: theme.colors.ink,
+    paddingVertical: 4,
+  },
+  callLink: {
+    fontSize: 15,
     fontWeight: '700',
-    color: theme.colors.slate,
+    color: theme.colors.redBright,
+  },
+  infoRow: {
+    gap: 2,
+    paddingVertical: 4,
+  },
+  infoLabel: {
+    fontSize: 11,
+    color: theme.colors.inkFaint,
+  },
+  infoValue: {
+    fontSize: 15,
+    color: theme.colors.ink,
+    lineHeight: 20,
   },
   mono: {
+    fontFamily: theme.fonts.mono,
     fontSize: 13,
-    color: theme.colors.slateMuted,
-    fontFamily: 'SpaceMono',
+    color: theme.colors.inkMuted,
   },
-  body: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: theme.colors.slate,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: theme.colors.slate,
-    marginBottom: 4,
-  },
-  emergencyRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 8,
+  simulateButton: {
+    marginTop: 4,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.red,
+    backgroundColor: theme.colors.emergencyBg,
     alignItems: 'center',
   },
-  emergencyInput: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 18,
-    fontWeight: '700',
-    color: theme.colors.slate,
-  },
-  callButton: {
-    backgroundColor: theme.colors.danger,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 10,
-  },
-  callButtonPressed: {
+  simulateButtonPressed: {
     opacity: 0.8,
   },
-  callButtonText: {
-    fontSize: 16,
+  simulateButtonText: {
+    fontSize: 15,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: theme.colors.redBright,
+    letterSpacing: 0.2,
+  },
+  footnote: {
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    fontSize: 12,
+    lineHeight: 17,
+    color: theme.colors.inkFaint,
   },
 });

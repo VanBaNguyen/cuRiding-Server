@@ -6,16 +6,17 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "curiding",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B0B0D",
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "CuRiding shows your device location on the map for safety monitoring."
+        "NSLocationWhenInUseUsageDescription": "CuRiding shows your location on the map so you can see where you are relative to your safety unit."
       }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0D9488",
+        "backgroundColor": "#0B0B0D",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -25,7 +26,12 @@
         "ACCESS_FINE_LOCATION"
       ],
       "predictiveBackGestureEnabled": false,
-      "package": "com.siddigz.curiding"
+      "package": "com.siddigz.curiding",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAsd48b3jl26rutQg-gQ9AZPfKTQQlrBo4"
+        }
+      }
     },
     "web": {
       "bundler": "metro",
@@ -35,9 +41,9 @@
     "plugins": [
       "expo-router",
       [
-        "react-native-maps",
+        "expo-location",
         {
-          "androidGoogleMapsApiKey": "AIzaSyAsd48b3jl26rutQg-gQ9AZPfKTQQlrBo4"
+          "locationWhenInUsePermission": "CuRiding shows your location on the map so you can see where you are relative to your safety unit."
         }
       ],
       [
@@ -45,7 +51,7 @@
         {
           "image": "./assets/images/splash-icon.png",
           "resizeMode": "contain",
-          "backgroundColor": "#0D9488"
+          "backgroundColor": "#0B0B0D"
         }
       ]
     ],

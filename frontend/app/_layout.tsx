@@ -1,10 +1,11 @@
+import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { Stack } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
 
-import { useColorScheme } from '@/components/useColorScheme';
 import { TelemetryProvider } from '@/src/context/TelemetryContext';
 import { theme } from '@/src/theme';
 
@@ -16,15 +17,17 @@ export const unstable_settings = {
 
 SplashScreen.preventAutoHideAsync();
 
-const CuRidingLight = {
-  ...DefaultTheme,
+// The cockpit is a fixed dark instrument cluster — no light variant.
+const RavenCockpit = {
+  ...DarkTheme,
   colors: {
-    ...DefaultTheme.colors,
-    primary: theme.colors.primary,
+    ...DarkTheme.colors,
+    primary: theme.colors.red,
     background: theme.colors.background,
     card: theme.colors.surface,
-    text: theme.colors.slate,
+    text: theme.colors.ink,
     border: theme.colors.border,
+    notification: theme.colors.red,
   },
 };
 
@@ -51,12 +54,11 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
-  const colorScheme = useColorScheme();
-
   return (
     <TelemetryProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : CuRidingLight}>
-        <Stack>
+      <ThemeProvider value={RavenCockpit}>
+        <StatusBar style="light" />
+        <Stack screenOptions={{ contentStyle: { backgroundColor: theme.colors.background } }}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         </Stack>
       </ThemeProvider>

@@ -13,22 +13,25 @@ export function SpeedBadge({ speedKmh }: { speedKmh: number }) {
 
 const styles = StyleSheet.create({
   wrap: {
-    backgroundColor: theme.colors.slate,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    alignItems: 'center',
-    minWidth: 72,
+    alignItems: 'flex-end',
   },
   value: {
-    color: '#fff',
+    fontFamily: theme.fonts.mono,
+    color: theme.colors.ink,
     fontSize: 28,
-    fontWeight: '700',
-    lineHeight: 32,
+    lineHeight: 30,
+    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
   },
   unit: {
-    color: '#94A3B8',
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    color: theme.colors.redBright,
+    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
 });

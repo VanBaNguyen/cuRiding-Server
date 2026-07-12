@@ -8,13 +8,14 @@ export function RideChart({ points }: { points: TelemetryPoint[] }) {
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.label}>Speed over time</Text>
       <View style={styles.chart}>
         {points.map((p, i) => {
-          const height = Math.max(8, (p.speedKmh / max) * 100);
+          const ratio = p.speedKmh / max;
+          const height = Math.max(6, ratio * 100);
+          const color = ratio > 0.75 ? theme.colors.red : theme.colors.inkFaint;
           return (
             <View key={`${p.timestamp}-${i}`} style={styles.barCol}>
-              <View style={[styles.bar, { height }]} />
+              <View style={[styles.bar, { height, backgroundColor: color }]} />
             </View>
           );
         })}
@@ -29,23 +30,14 @@ export function RideChart({ points }: { points: TelemetryPoint[] }) {
 
 const styles = StyleSheet.create({
   wrap: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    gap: 8,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: theme.colors.slateMuted,
+    paddingTop: 12,
+    gap: 6,
   },
   chart: {
-    height: 110,
+    height: 96,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 4,
+    gap: 2,
   },
   barCol: {
     flex: 1,
@@ -53,16 +45,16 @@ const styles = StyleSheet.create({
   },
   bar: {
     width: '100%',
-    backgroundColor: theme.colors.primary,
-    borderTopLeftRadius: 4,
-    borderTopRightRadius: 4,
+    borderTopLeftRadius: 2,
+    borderTopRightRadius: 2,
   },
   axis: {
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
   axisText: {
-    fontSize: 11,
-    color: theme.colors.slateMuted,
+    fontFamily: theme.fonts.mono,
+    fontSize: 10,
+    color: theme.colors.inkFaint,
   },
 });

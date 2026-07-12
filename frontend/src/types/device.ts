@@ -1,6 +1,11 @@
-export type DeviceStatus = 'online' | 'ai_warning' | 'braking' | 'emergency' | 'offline';
+export type DeviceStatus = 'online' | 'offline' | 'waiting' | 'alert' | 'emergency';
 
-export type SafetyEventType = 'ai_warning' | 'auto_brake' | 'crash';
+export type SafetyEventType =
+  | 'crash'
+  | 'custom'
+  | 'low_battery'
+  | 'geofence_exit'
+  | 'device_offline';
 
 export interface TelemetryPoint {
   lat: number;
@@ -45,4 +50,13 @@ export interface LiveState {
   status: DeviceStatus;
   pathIndex: number;
   lastUpdated: string;
+}
+
+export interface DeviceStatusSnapshot {
+  online: boolean;
+  heartbeatAgeSeconds: number | null;
+  positionAgeSeconds: number | null;
+  heartbeatSeq: number | null;
+  activeAlert: string | null;
+  crashSuspected: boolean;
 }

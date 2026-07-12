@@ -1,12 +1,13 @@
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { RideChart } from '@/src/components/RideChart';
+import { clipReasonLabel } from '@/src/api/clips';
+import { ClipPlayer } from '@/src/components/ClipPlayer';
 import { useTelemetry } from '@/src/context/TelemetryContext';
 import { theme } from '@/src/theme';
-import type { Ride } from '@/src/types/device';
+import type { ClipMeta } from '@/src/types/clip';
 
-function formatRideDate(iso: string) {
+function formatClipDate(iso: string) {
   return new Date(iso).toLocaleString(undefined, {
     weekday: 'short',
     month: 'short',
@@ -16,67 +17,121 @@ function formatRideDate(iso: string) {
   });
 }
 
-function RideCard({
-  ride,
-  selected,
+function clipSummary(clip: ClipMeta) {
+  return `${clip.duration_s}s · ${clip.frame_count} frames`;
+}
+
+function reasonColor(reason: ClipMeta['reason']) {
+  if (reason === 'crash') return theme.colors.redBright;
+  if (reason === 'crash-sim') return theme.colors.warning;
+  return theme.colors.inkMuted;
+}
+
+function ClipRow({
+  clip,
+  expanded,
   onPress,
 }: {
-  ride: Ride;
-  selected: boolean;
+  clip: ClipMeta;
+  expanded: boolean;
   onPress: () => void;
 }) {
+  const { loadClipFrames } = useTelemetry();
+  const [frames, setFrames] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [playing, setPlaying] = useState(false);
+
+  useEffect(() => {
+    if (!expanded) {
+      setPlaying(false);
+      return;
+    }
+    setLoading(true);
+    loadClipFrames(clip.id)
+      .then((data) => {
+        setFrames(data);
+        setPlaying(true);
+      })
+      .catch((e) => console.error('Failed to load clip:', e))
+      .finally(() => setLoading(false));
+  }, [expanded, clip.id, loadClipFrames]);
+
   return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.card, selected && styles.cardSelected]}>
-      <Text style={styles.cardTitle}>{formatRideDate(ride.startedAt)}</Text>
-      <View style={styles.stats}>
-        <Stat label="Duration" value={`${ride.durationMin} min`} />
-        <Stat label="Distance" value={`${ride.distanceKm} km`} />
-        <Stat label="Avg" value={`${ride.avgSpeedKmh} km/h`} />
-        <Stat label="Max" value={`${ride.maxSpeedKmh} km/h`} />
+    <Pressable onPress={onPress} style={[styles.row, expanded && styles.rowExpanded]}>
+      {expanded ? <View style={styles.activeMark} /> : null}
+      <View style={styles.rowBody}>
+        <View style={styles.topLine}>
+          <Text style={[styles.reason, { color: reasonColor(clip.reason) }]}>
+            {clipReasonLabel(clip.reason)}
+          </Text>
+          <Text style={styles.date}>{formatClipDate(clip.created_at)}</Text>
+        </View>
+        <Text style={styles.summary}>{clipSummary(clip)}</Text>
+        {expanded ? (
+          loading ? (
+            <ActivityIndicator color={theme.colors.red} style={styles.loader} />
+          ) : (
+            <>
+              <ClipPlayer frames={frames} playing={playing} />
+              <Pressable onPress={() => setPlaying((p) => !p)} hitSlop={8}>
+                <Text style={styles.playToggle}>{playing ? 'Pause' : 'Play'}</Text>
+              </Pressable>
+            </>
+          )
+        ) : null}
       </View>
-      {selected ? <RideChart points={ride.points} /> : null}
     </Pressable>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.stat}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value}</Text>
-    </View>
-  );
-}
+export default function ClipsScreen() {
+  const { clips, recording, toggleRecording, selectedClipId, setSelectedClipId } = useTelemetry();
+  const [expandedId, setExpandedId] = useState<string | null>(selectedClipId);
 
-export default function HistoryScreen() {
-  const { rides } = useTelemetry();
-  const [selectedId, setSelectedId] = useState<string | null>(rides[0]?.id ?? null);
+  useEffect(() => {
+    if (selectedClipId) {
+      setExpandedId(selectedClipId);
+      setSelectedClipId(null);
+    }
+  }, [selectedClipId, setSelectedClipId]);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.heading}>Ride history</Text>
-      <Text style={styles.sub}>Speed and distance from the CuRiding unit.</Text>
-      {rides.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyIcon}>🚲</Text>
-          <Text style={styles.emptyTitle}>No rides yet</Text>
-          <Text style={styles.emptyBody}>
-            Ride data will appear here once the CuRiding unit records a trip.
+    <View style={styles.screen}>
+      <View style={styles.toolbar}>
+        <Pressable
+          onPress={toggleRecording}
+          style={[styles.recordButton, recording && styles.recordButtonActive]}>
+          <View style={[styles.recordDot, recording && styles.recordDotActive]} />
+          <Text style={[styles.recordLabel, recording && styles.recordLabelActive]}>
+            {recording ? 'Stop recording' : 'Record'}
           </Text>
-        </View>
-      ) : (
-        rides.map((ride) => (
-          <RideCard
-            key={ride.id}
-            ride={ride}
-            selected={selectedId === ride.id}
-            onPress={() => setSelectedId(selectedId === ride.id ? null : ride.id)}
-          />
-        ))
-      )}
-    </ScrollView>
+        </Pressable>
+        <Text style={styles.toolbarHint}>
+          {recording ? 'Saving camera frames…' : 'Includes a few seconds before you tap Record'}
+        </Text>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.content}>
+        {clips.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>No clips yet</Text>
+            <Text style={styles.emptyBody}>
+              Crash footage saves automatically. Use Record on the live feed or here to capture
+              manual clips.
+            </Text>
+          </View>
+        ) : (
+          clips.map((clip) => (
+            <ClipRow
+              key={clip.id}
+              clip={clip}
+              expanded={expandedId === clip.id}
+              onPress={() => setExpandedId(expandedId === clip.id ? null : clip.id)}
+            />
+          ))
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -85,75 +140,119 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
-  content: {
-    padding: theme.spacing.md,
-    gap: 12,
-    paddingBottom: 32,
+  toolbar: {
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
   },
-  heading: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: theme.colors.slate,
-  },
-  sub: {
-    fontSize: 14,
-    color: theme.colors.slateMuted,
-    marginBottom: 4,
-  },
-  card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.md,
+  recordButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: theme.radius.pill,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    gap: 12,
+    backgroundColor: theme.colors.surface,
   },
-  cardSelected: {
-    borderColor: theme.colors.primary,
+  recordButtonActive: {
+    borderColor: theme.colors.red,
+    backgroundColor: theme.colors.emergencyBg,
   },
-  cardTitle: {
-    fontSize: 16,
+  recordDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.colors.redBright,
+  },
+  recordDotActive: {
+    borderRadius: 2,
+  },
+  recordLabel: {
+    fontSize: 14,
     fontWeight: '700',
-    color: theme.colors.slate,
+    color: theme.colors.ink,
   },
-  stats: {
+  recordLabelActive: {
+    color: theme.colors.redBright,
+  },
+  toolbarHint: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: theme.colors.inkMuted,
+  },
+  content: {
+    paddingBottom: 24,
+  },
+  row: {
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
   },
-  stat: {
-    minWidth: '45%',
-    flexGrow: 1,
+  rowExpanded: {
+    backgroundColor: theme.colors.surface,
   },
-  statLabel: {
-    fontSize: 11,
-    color: theme.colors.slateMuted,
-    fontWeight: '600',
+  activeMark: {
+    width: 2,
+    backgroundColor: theme.colors.red,
+    marginRight: 12,
+    marginLeft: -18,
+    alignSelf: 'stretch',
   },
-  statValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: theme.colors.slate,
+  rowBody: {
+    flex: 1,
+    gap: 6,
   },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 48,
+  topLine: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
     gap: 8,
   },
-  emptyIcon: {
-    fontSize: 40,
-    marginBottom: 4,
+  reason: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  date: {
+    fontFamily: theme.fonts.mono,
+    fontSize: 11,
+    color: theme.colors.inkFaint,
+  },
+  summary: {
+    fontFamily: theme.fonts.mono,
+    fontSize: 12,
+    color: theme.colors.inkMuted,
+  },
+  playToggle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.colors.redBright,
+  },
+  loader: {
+    marginVertical: 24,
+  },
+  empty: {
+    paddingHorizontal: 18,
+    paddingTop: 48,
+    gap: 6,
   },
   emptyTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
-    color: theme.colors.slate,
+    color: theme.colors.ink,
   },
   emptyBody: {
     fontSize: 14,
-    color: theme.colors.slateMuted,
-    textAlign: 'center',
     lineHeight: 20,
-    maxWidth: 280,
+    color: theme.colors.inkMuted,
+    maxWidth: 320,
   },
 });
