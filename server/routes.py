@@ -4,7 +4,8 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import Response
 
 from config import settings
 from models import (
@@ -16,6 +17,7 @@ from models import (
     TelemetryStatus,
 )
 from nmea import parse_nmea
+from snapshots import channel_for, snapshot_store
 from store import gps_store, manager
 from telemetry import telemetry_store
 
@@ -266,6 +268,67 @@ async def get_latest(device_id: str) -> GPSData:
 async def list_devices() -> list[dict]:
     """Return a list of all devices that have reported GPS data."""
     return gps_store.list_devices()
+
+
+# ---------------------------------------------------------------------------
+# Camera snapshots — the Pi POSTs a JPEG every few seconds
+# ---------------------------------------------------------------------------
+
+# reject absurdly large uploads (a downscaled JPEG is tens of KB)
+MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
+
+
+@router.post("/snapshot", status_code=status.HTTP_201_CREATED)
+async def ingest_snapshot(request: Request) -> dict:
+    """Receive a JPEG frame (raw image/jpeg body) from the Pi camera.
+
+    Stored as the latest snapshot for the app device and pushed to
+    /ws/snapshot subscribers as base64.
+    """
+    body = await request.body()
+    if not body:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty snapshot body")
+    if len(body) > MAX_SNAPSHOT_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "snapshot too large")
+    subscribers = await snapshot_store.update(settings.app_device_id, body)
+    return {
+        "status": "ok",
+        "device_id": settings.app_device_id,
+        "bytes": len(body),
+        "subscribers": subscribers,
+    }
+
+
+@router.get("/snapshot")
+async def get_snapshot() -> Response:
+    """Return the latest camera frame as image/jpeg (for a plain <img> URI)."""
+    latest = snapshot_store.get_latest(settings.app_device_id)
+    if latest is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no snapshot yet")
+    jpeg, _ = latest
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
+@router.websocket("/ws/snapshot")
+async def snapshot_websocket(websocket: WebSocket) -> None:
+    """Stream camera snapshots over WebSocket (WSS through the tunnel).
+
+    Sends the latest frame on connect and every new frame thereafter as
+    {"type": "snapshot", "jpeg_b64": ...} so the app can render a data URI
+    without any HTTP fetch.
+    """
+    channel = channel_for(settings.app_device_id)
+    await manager.subscribe(channel, websocket)
+    seed = snapshot_store.latest_message(settings.app_device_id)
+    if seed is not None:
+        await websocket.send_json(seed)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        logger.info("Snapshot WebSocket client disconnected")
+    finally:
+        manager.unsubscribe(channel, websocket)
 
 
 # ---------------------------------------------------------------------------
