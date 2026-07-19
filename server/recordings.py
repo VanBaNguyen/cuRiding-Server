@@ -41,7 +41,7 @@ class Recorder:
         self._buffer: Deque[Frame] = deque(maxlen=settings.precrash_frames)
         self._recording = False
         self._recording_frames: List[Frame] = []
-        self._index: Dict[str, dict] = {}
+        self._index: Dict[str, dict] = {}   # clip_id -> meta
         self._lock = asyncio.Lock()
         os.makedirs(settings.clips_dir, exist_ok=True)
         self._load_index()
@@ -57,6 +57,8 @@ class Recorder:
                     logger.warning("Could not load clip meta %s", meta_path)
         logger.info("Recorder: %d existing clip(s) loaded", len(self._index))
 
+    # -- ingest ------------------------------------------------------------
+
     async def on_frame(self, jpeg: bytes) -> None:
         """Append a newly received camera frame to the buffer / recording."""
         frame: Frame = (jpeg, _now())
@@ -65,13 +67,15 @@ class Recorder:
             if self._recording:
                 self._recording_frames.append(frame)
 
+    # -- manual recording --------------------------------------------------
+
     async def start_recording(self) -> bool:
         """Begin a manual recording (seeded with the pre-roll buffer)."""
         async with self._lock:
             if self._recording:
                 return False
             self._recording = True
-            self._recording_frames = list(self._buffer)
+            self._recording_frames = list(self._buffer)  # include a bit before
         logger.info("Recording started")
         return True
 
@@ -88,6 +92,8 @@ class Recorder:
     def is_recording(self) -> bool:
         return self._recording
 
+    # -- crash clip --------------------------------------------------------
+
     async def make_crash_clip(self, reason: str = "crash") -> Optional[str]:
         """Save the current pre-crash buffer as a clip."""
         async with self._lock:
@@ -96,6 +102,8 @@ class Recorder:
         if clip_id is None:
             logger.warning("Crash clip requested but no frames buffered yet")
         return clip_id
+
+    # -- storage -----------------------------------------------------------
 
     async def _save_clip(self, reason: str, frames: List[Frame]) -> Optional[str]:
         if not frames:
@@ -115,7 +123,9 @@ class Recorder:
             "reason": reason,
             "created_at": created.isoformat(),
             "frame_count": len(frames),
-            "duration_s": round((frames[-1][1] - frames[0][1]).total_seconds(), 1),
+            "duration_s": round(
+                (frames[-1][1] - frames[0][1]).total_seconds(), 1
+            ),
         }
         with open(os.path.join(clip_dir, "meta.json"), "w") as handle:
             json.dump(meta, handle)
@@ -137,6 +147,8 @@ class Recorder:
         for meta in ordered[: len(self._index) - settings.max_clips]:
             self._index.pop(meta["id"], None)
             shutil.rmtree(os.path.join(settings.clips_dir, meta["id"]), ignore_errors=True)
+
+    # -- read --------------------------------------------------------------
 
     def list_clips(self) -> List[dict]:
         return sorted(self._index.values(), key=lambda m: m["created_at"], reverse=True)

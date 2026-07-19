@@ -1,13 +1,10 @@
 """Telemetry heartbeat store and crash watchdog.
 
 The Pi posts one heartbeat per second (see TelemetryHeartbeat). This module
-keeps the latest heartbeat per device, relays it over a dedicated telemetry
-WebSocket channel, surfaces rider alerts as events, and runs a watchdog that
-raises a crash event when a device goes silent while it was last seen moving.
-
-Location is deliberately NOT taken from telemetry: the scooter's position
-always comes from the Find My tag (haystack.py), which works without the
-Pi's WiFi, so any GPS fix embedded in a heartbeat is ignored here.
+keeps the latest heartbeat per device, relays it over the existing WebSocket
+channel, mirrors any embedded GPS fix into the GPS store, and runs a
+watchdog that raises a crash event when a device goes silent while it was
+last seen moving.
 """
 
 import asyncio
@@ -16,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from config import settings
-from models import DeviceEvent, EventType, TelemetryHeartbeat, TelemetryStatus
+from models import DeviceEvent, EventType, GPSData, TelemetryHeartbeat, TelemetryStatus
 from recordings import recorder
 from store import gps_store, manager
 
@@ -80,10 +77,19 @@ class TelemetryStore:
         }
         await manager.broadcast(f"{app_id}-telemetry", payload)
 
-        # NOTE: the telemetry heartbeat's embedded GPS fix is intentionally
-        # ignored. The scooter's position always comes from the Find My tag
-        # (see haystack.py), which reports independently of the Pi's WiFi, so
-        # it is the single source of truth for location.
+        # mirror a valid GPS fix into the GPS store so the existing map
+        # endpoints and WebSocket messages keep working unchanged
+        if heartbeat.gps.valid and heartbeat.gps.lat is not None:
+            await gps_store.update(
+                GPSData(
+                    device_id=app_id,
+                    latitude=heartbeat.gps.lat,
+                    longitude=heartbeat.gps.lon,
+                    speed=max(heartbeat.speedKmh, 0.0) / 3.6,
+                    heading=heartbeat.gps.courseDeg,
+                    satellites=heartbeat.gps.sats,
+                )
+            )
 
         # surface rider alerts (danger warnings, red light) as legacy events
         if new_alert:
@@ -131,13 +137,11 @@ class TelemetryStore:
         ]
 
     async def check_for_crashes(self) -> None:
-        """Flag devices whose heartbeat stream stopped abruptly.
+        """Flag devices whose heartbeats stopped while they were moving.
 
-        The Pi heartbeats every second; once a device has reported at least
-        one heartbeat, a gap of `crash_gap_s` with no new heartbeat is treated
-        as a crash (the device lost power or went down mid-ride). Speed is not
-        considered — location comes from the Find My tag, so live speed is not
-        available; a sudden stop in the heartbeat stream is the crash signal.
+        The Pi heartbeats every second; a gap of `crash_gap_s` while the
+        last known speed was at least `crash_min_speed_kmh` suggests the
+        rider went down (or the device lost power mid-ride).
         """
         now = _utcnow()
         suspects: List[str] = []
@@ -147,33 +151,50 @@ class TelemetryStore:
                 if status.crash_suspected:
                     continue
                 gap = (now - status.received_at).total_seconds()
-                if gap >= settings.crash_gap_s:
+                # speed < 0 means "unknown" (no GPS module). With no speed we
+                # cannot rule out that the scooter was moving, so a heartbeat
+                # gap is treated as a crash/loss regardless — this is the
+                # original "stops pinging => crash" intent. When speed IS
+                # known, require it to have been moving to avoid flagging a
+                # scooter that was simply parked and switched off.
+                speed = status.heartbeat.speedKmh
+                was_moving = speed < 0 or speed >= settings.crash_min_speed_kmh
+                if gap >= settings.crash_gap_s and was_moving:
                     status.crash_suspected = True
                     suspects.append(device)
 
         for device in suspects:
             status = self._status[device]
-            gap = (now - status.received_at).total_seconds()
+            speed = status.heartbeat.speedKmh
+            silent_s = (now - status.received_at).total_seconds()
             logger.error(
-                "CRASH SUSPECTED: %s heartbeat stopped %.0fs ago",
+                "CRASH SUSPECTED: %s silent for %.0fs, last speed %s",
                 device,
-                gap,
+                silent_s,
+                "unknown (no GPS)" if speed < 0 else f"{speed:.1f} km/h",
             )
+            if speed < 0:
+                message = f"heartbeats stopped for {silent_s:.0f}s (no speed data)"
+            else:
+                message = f"heartbeats stopped while moving at {speed:.1f} km/h"
             await gps_store.broadcast_event(
                 DeviceEvent(
                     device_id=settings.app_device_id,
                     event_type=EventType.CRASH,
-                    message=f"heartbeat stopped suddenly ({gap:.0f}s ago)",
+                    message=message,
+                    speed=max(speed, 0.0) / 3.6,
                 )
             )
+            # save the pre-crash camera footage as a clip
             await recorder.make_crash_clip("crash")
 
 
 async def crash_watchdog(store: "TelemetryStore") -> None:
     """Background task: periodically scan for heartbeat gaps."""
     logger.info(
-        "Crash watchdog running (heartbeat gap %.0fs)",
+        "Crash watchdog running (gap %.0fs, min speed %.1f km/h)",
         settings.crash_gap_s,
+        settings.crash_min_speed_kmh,
     )
     while True:
         try:

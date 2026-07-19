@@ -278,18 +278,24 @@ async def list_devices() -> list[dict]:
 # Camera snapshots — the Pi POSTs a JPEG every few seconds
 # ---------------------------------------------------------------------------
 
+# reject absurdly large uploads (a downscaled JPEG is tens of KB)
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
 
 
 @router.post("/snapshot", status_code=status.HTTP_201_CREATED)
 async def ingest_snapshot(request: Request) -> dict:
-    """Receive a JPEG frame (raw image/jpeg body) from the Pi camera."""
+    """Receive a JPEG frame (raw image/jpeg body) from the Pi camera.
+
+    Stored as the latest snapshot for the app device and pushed to
+    /ws/snapshot subscribers as base64.
+    """
     body = await request.body()
     if not body:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty snapshot body")
     if len(body) > MAX_SNAPSHOT_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "snapshot too large")
     subscribers = await snapshot_store.update(settings.app_device_id, body)
+    # feed the rolling pre-crash buffer / any active recording
     await recorder.on_frame(body)
     return {
         "status": "ok",
@@ -299,16 +305,6 @@ async def ingest_snapshot(request: Request) -> dict:
     }
 
 
-@router.get("/snapshot")
-async def get_snapshot() -> Response:
-    """Return the latest camera frame as image/jpeg."""
-    latest = snapshot_store.get_latest(settings.app_device_id)
-    if latest is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "no snapshot yet")
-    jpeg, _ = latest
-    return Response(content=jpeg, media_type="image/jpeg")
-
-
 # ---------------------------------------------------------------------------
 # Clips — crash recordings + manual "record" button from the phone
 # ---------------------------------------------------------------------------
@@ -316,14 +312,18 @@ async def get_snapshot() -> Response:
 
 @router.post("/recording/start", status_code=status.HTTP_201_CREATED)
 async def recording_start() -> dict:
-    """Phone record button: begin capturing camera frames into a clip."""
+    """Phone 'record' button: begin capturing camera frames into a clip.
+
+    The recording is seeded with the pre-crash buffer, so it includes a few
+    seconds of footage from just before the button was pressed.
+    """
     started = await recorder.start_recording()
     return {"status": "recording" if started else "already_recording"}
 
 
 @router.post("/recording/stop", status_code=status.HTTP_201_CREATED)
 async def recording_stop() -> dict:
-    """Phone stop button: finish the recording and save it as a clip."""
+    """Phone 'stop' button: finish the recording and save it as a clip."""
     clip_id = await recorder.stop_recording()
     if clip_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "not recording (or no frames)")
@@ -338,7 +338,8 @@ async def recording_state() -> dict:
 
 @router.post("/crash/simulate", status_code=status.HTTP_201_CREATED)
 async def crash_simulate() -> dict:
-    """Trigger a simulated crash: save pre-crash buffer and broadcast event."""
+    """Trigger a simulated crash: save the pre-crash buffer as a clip and
+    broadcast a crash event, exactly as a real detected crash would."""
     clip_id = await recorder.make_crash_clip("crash-sim")
     await gps_store.broadcast_event(
         DeviceEvent(
@@ -367,7 +368,7 @@ async def get_clip(clip_id: str) -> dict:
 
 @router.get("/clips/{clip_id}/frames")
 async def get_clip_frames(clip_id: str) -> dict:
-    """All frames of a clip as base64 JPEGs."""
+    """All frames of a clip as base64 JPEGs, for WSS-only playback in the app."""
     frames = recorder.read_frames(clip_id)
     if frames is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"no clip '{clip_id}'")
@@ -380,7 +381,7 @@ async def get_clip_frames(clip_id: str) -> dict:
 
 @router.get("/clips/{clip_id}/frame/{index}")
 async def get_clip_frame(clip_id: str, index: int) -> Response:
-    """A single clip frame as image/jpeg."""
+    """A single clip frame as image/jpeg (for a plain <img> URI)."""
     path = recorder.frame_path(clip_id, index)
     if path is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such frame")
@@ -390,7 +391,11 @@ async def get_clip_frame(clip_id: str, index: int) -> Response:
 
 @router.websocket("/ws/clips")
 async def clips_websocket(websocket: WebSocket) -> None:
-    """Notify the app when a new clip is saved."""
+    """Notify the app when a new clip is saved (crash or manual).
+
+    Sends the current clip list on connect, then a {"type": "clip", ...}
+    message each time a clip is created.
+    """
     channel = clips_channel(settings.app_device_id)
     await manager.subscribe(channel, websocket)
     await websocket.send_json({"type": "clips", "clips": recorder.list_clips()})
@@ -403,9 +408,24 @@ async def clips_websocket(websocket: WebSocket) -> None:
         manager.unsubscribe(channel, websocket)
 
 
+@router.get("/snapshot")
+async def get_snapshot() -> Response:
+    """Return the latest camera frame as image/jpeg (for a plain <img> URI)."""
+    latest = snapshot_store.get_latest(settings.app_device_id)
+    if latest is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no snapshot yet")
+    jpeg, _ = latest
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
 @router.websocket("/ws/snapshot")
 async def snapshot_websocket(websocket: WebSocket) -> None:
-    """Stream camera snapshots over WebSocket as base64 JPEG frames."""
+    """Stream camera snapshots over WebSocket (WSS through the tunnel).
+
+    Sends the latest frame on connect and every new frame thereafter as
+    {"type": "snapshot", "jpeg_b64": ...} so the app can render a data URI
+    without any HTTP fetch.
+    """
     channel = channel_for(settings.app_device_id)
     await manager.subscribe(channel, websocket)
     seed = snapshot_store.latest_message(settings.app_device_id)
